@@ -402,6 +402,20 @@ describe('TTLCache', () => {
       expect(cache.get('tags')).toEqual(tags);
       cache.destroy();
     });
+    it('preserves Date instance values in TTLCache', () => {
+      const cache = new TTLCache<Date>();
+
+      const date = new Date('2026-05-31T00:00:00.000Z');
+
+      cache.set('created-at', date, 60_000);
+
+      const cached = cache.get('created-at');
+
+      expect(cached).toBeInstanceOf(Date);
+      expect(cached?.toISOString()).toBe(date.toISOString());
+
+      cache.destroy();
+    });
 
     it('stores and retrieves nested object values', () => {
       const cache = new TTLCache<{
