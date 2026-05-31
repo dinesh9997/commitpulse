@@ -14,7 +14,7 @@ import { Footer } from '@/app/components/Footer';
 
 import { FeatureCard, FeatureCardsSection } from '@/components/FeatureCards';
 import { DiscordButton } from '@/components/DiscordButton';
-import { InteractiveViewer } from '@/components/InteractiveViewer';
+import InteractiveViewer from '@/components/InteractiveViewer';
 
 const Icons = {
   Github: () => (
