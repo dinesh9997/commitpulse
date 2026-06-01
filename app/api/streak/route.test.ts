@@ -259,6 +259,28 @@ describe('GET /api/streak', () => {
       expect(response.status).toBe(400);
     });
 
+    it('returns 400 when an invalid theme value is provided and lists allowed themes', async () => {
+      const response = await GET(
+        makeRequest({
+          user: 'octocat',
+          theme: 'nonexistent_theme_name',
+        })
+      );
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error).toBe('Invalid parameters');
+      expect(body.details.fieldErrors.theme).toBeDefined();
+      const errorMessage = body.details.fieldErrors.theme[0];
+      expect(errorMessage).toContain('Invalid theme');
+      expect(errorMessage).toContain('Supported themes:');
+      expect(errorMessage).toContain('auto');
+      expect(errorMessage).toContain('random');
+      expect(errorMessage).toContain('dark');
+      expect(errorMessage).toContain('light');
+      expect(fetchGitHubContributions).not.toHaveBeenCalled();
+    });
+
     it('should return 200 OK and valid SVG when the optional repo query parameter is provided', async () => {
       // 1. Make request with both parameters present
       const response = await GET(makeRequest({ user: 'octocat', repo: 'commitpulse' }));
