@@ -1,4 +1,4 @@
-import { TTLCache } from './cache';
+import { DistributedCache } from './cache';
 
 interface RateLimitResult {
   success: boolean;
@@ -15,7 +15,7 @@ interface RateLimitResult {
  * For multi-instance strict syncing, a Redis store (Vercel KV/Upstash) should be used.
  */
 export class RateLimiter {
-  private cache: TTLCache<number>;
+  private cache: DistributedCache<number>;
   private limit: number;
   private windowMs: number;
   private allowlist = new Set<string>();
@@ -30,7 +30,7 @@ export class RateLimiter {
   constructor(limit = 5, windowMs = 60000) {
     this.limit = limit;
     this.windowMs = windowMs;
-    this.cache = new TTLCache<number>(10000, windowMs);
+    this.cache = new DistributedCache<number>(10000, windowMs);
   }
 
   /**
@@ -47,19 +47,13 @@ export class RateLimiter {
    *   return new Response("Too Many Requests", { status: 429 });
    * }
    */
-  check(ip: string): boolean {
+  async check(ip: string): Promise<boolean> {
     if (this.allowlist.has(ip)) return true;
     if (this.blocklist.has(ip)) return false;
-    const current = this.cache.get(ip) ?? 0;
-    if (current >= this.limit) return false;
-    if (current === 0) {
-      this.cache.set(ip, 1, this.windowMs);
-    } else {
-      this.cache.set(ip, current + 1, this.windowMs);
-    }
-    return true;
+    const count = await this.cache.incr(`ratelimit:${ip}`, this.windowMs);
+    return count <= this.limit;
   }
-  checkWithResult(ip: string): RateLimitResult {
+  async checkWithResult(ip: string): Promise<RateLimitResult> {
     if (this.allowlist.has(ip))
       return {
         success: true,
@@ -69,10 +63,11 @@ export class RateLimiter {
       };
     if (this.blocklist.has(ip))
       return { success: false, limit: this.limit, remaining: 0, reset: Date.now() + this.windowMs };
-    const now = Date.now();
-    const current = this.cache.get(ip) ?? 0;
 
-    if (current >= this.limit) {
+    const now = Date.now();
+    const count = await this.cache.incr(`ratelimit:${ip}`, this.windowMs);
+
+    if (count > this.limit) {
       return {
         success: false,
         limit: this.limit,
@@ -81,15 +76,10 @@ export class RateLimiter {
       };
     }
 
-    if (current === 0) {
-      this.cache.set(ip, 1, this.windowMs);
-    } else {
-      this.cache.set(ip, current + 1, this.windowMs);
-    }
     return {
       success: true,
       limit: this.limit,
-      remaining: this.limit - (current + 1),
+      remaining: this.limit - count,
       reset: now + this.windowMs,
     };
   }
@@ -104,8 +94,26 @@ export class RateLimiter {
    * @example
    * rateLimiter.reset("192.168.1.1");
    */
-  reset(ip: string): void {
-    this.cache.delete(ip);
+  async reset(ip: string): Promise<void> {
+    await this.cache.delete(`ratelimit:${ip}`);
+  }
+  /**
+   * Returns the number of remaining requests allowed for a given IP
+   * in the current window.
+   *
+   * Does not consume a request — use `check()` for that.
+   *
+   * @param ip - The IP address to check.
+   * @returns Promise resolving to the number of remaining requests,
+   *          or the full limit if the IP has no recorded requests.
+   *
+   * @example
+   * const left = await rateLimiter.remaining("192.168.1.1");
+   * console.log(`You have ${left} requests left.`);
+   */
+  async remaining(ip: string): Promise<number> {
+    const current = ((await this.cache.get(`ratelimit:${ip}`)) as unknown as number) ?? 0;
+    return Math.max(0, this.limit - current);
   }
 
   allow(ip: string): void {
@@ -130,14 +138,18 @@ export class RateLimiter {
 // Global instance for track-user endpoint (5 requests per IP per minute)
 export const trackUserRateLimiter = new RateLimiter(5, 60000);
 
+// Global instance for notify endpoint (5 requests per IP per minute)
+export const notifyRateLimiter = new RateLimiter(5, 60000);
+
 /**
- * Lightweight in-memory rate limiter for Next.js Edge Middleware.
+ * Distributed rate limiter for Next.js Edge Middleware.
  *
- * Note: In a distributed edge environment, this is per-instance.
- * For global rate limiting, a distributed store like Redis would be required.
+ * When Upstash Redis / Vercel KV is configured, counters are shared across
+ * all serverless instances via atomic INCR + EXPIRE Lua scripts.
+ * Falls back to a local in-memory cache for development environments.
  */
 
-const trackers = new TTLCache<{ count: number }>(2000, 60000);
+const trackers = new DistributedCache<number>(2000, 60000);
 
 /**
  * Checks if a request from a given IP should be rate limited.
@@ -153,28 +165,15 @@ const trackers = new TTLCache<{ count: number }>(2000, 60000);
  *   return new Response("Too Many Requests", { status: 429 });
  * }
  */
-export function rateLimit(
+export async function rateLimit(
   ip: string,
   limit: number = 60,
   windowMs: number = 60000
-): RateLimitResult {
+): Promise<RateLimitResult> {
   const now = Date.now();
-  const tracker = trackers.get(ip);
+  const count = await trackers.incr(ip, windowMs);
 
-  if (!tracker) {
-    trackers.set(ip, { count: 1 }, windowMs);
-    return {
-      success: true,
-      limit,
-      remaining: limit - 1,
-      reset: now + windowMs,
-    };
-  }
-
-  tracker.count++;
-  trackers.set(ip, tracker, windowMs);
-
-  if (tracker.count > limit) {
+  if (count > limit) {
     return {
       success: false,
       limit,
@@ -186,7 +185,7 @@ export function rateLimit(
   return {
     success: true,
     limit,
-    remaining: limit - tracker.count,
+    remaining: limit - count,
     reset: now + windowMs,
   };
 }
