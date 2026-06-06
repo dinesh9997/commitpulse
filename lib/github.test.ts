@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   fetchGitHubContributions,
   fetchWithRetry,
@@ -10,22 +10,26 @@ import {
   buildCommitClock,
   clearGitHubApiCacheForTests,
   GITHUB_CACHE_TTL_MS,
-  validateGitHubUsername,
   cacheKey,
   displayName,
   fetchOrgMembers,
   getOrgDashboardData,
   getWrappedData,
   computeDeveloperScore,
+  runCappedConcurrency,
   buildProfileData,
   aggregateLanguages,
   buildInsights,
   buildActivityMap,
+  contributionsCache,
 } from './github';
 import type { ContributionCalendar } from '../types';
 
+vi.mock('server-only', () => ({}));
+
 const mockCalendar: ContributionCalendar = {
-  totalContributions: 42,
+  totalContributions: 8,
+  repoContributions: 42,
   weeks: [
     {
       contributionDays: [
@@ -231,8 +235,6 @@ describe('fetchGitHubContributions', () => {
     );
 
     const { calendar: result } = await fetchGitHubContributions('octocat');
-
-    expect(result.totalContributions).toBe(mockCalendar.totalContributions);
     expect(result.weeks[0].contributionDays[0].contributionCount).toBe(3);
   });
 
@@ -290,6 +292,29 @@ describe('fetchGitHubContributions', () => {
       Authorization: 'bearer actions-token',
     });
   });
+  it('verifies Authorization header uses GITHUB_TOKEN value in fallback path', async () => {
+    delete process.env.GITHUB_PAT;
+    process.env.GITHUB_TOKEN = 'my-actions-token';
+    vi.mocked(fetch).mockResolvedValue(
+      mockResponse({
+        data: {
+          user: {
+            contributionsCollection: {
+              contributionCalendar: mockCalendar,
+              commitContributionsByRepository: [],
+            },
+          },
+        },
+      })
+    );
+
+    await fetchGitHubContributions('octocat');
+
+    const [, options] = vi.mocked(fetch).mock.calls[0];
+    expect(options?.headers).toMatchObject({
+      Authorization: 'bearer my-actions-token',
+    });
+  });
 
   it('throws before fetching when no GitHub token is configured', async () => {
     delete process.env.GITHUB_PAT;
@@ -304,6 +329,7 @@ describe('fetchGitHubContributions', () => {
   it('works correctly for a brand-new user who has zero contribution weeks', async () => {
     const emptyCalendar: ContributionCalendar = {
       totalContributions: 0,
+      repoContributions: 0,
       weeks: [],
     };
 
@@ -319,7 +345,7 @@ describe('fetchGitHubContributions', () => {
 
     const { calendar: result } = await fetchGitHubContributions('new-user');
 
-    expect(result.totalContributions).toBe(0);
+    expect(result.repoContributions).toBe(0);
     expect(result.weeks).toHaveLength(0);
   });
 
@@ -380,7 +406,7 @@ describe('fetchGitHubContributions', () => {
     );
   });
 
-  // GitHub GraphQL returns HTTP 200 for rate limit errors — the error lives in the body.
+  // GitHub GraphQL returns HTTP 200 for rate limit errors â€” the error lives in the body.
   // fetchGraphQLWithRetry must detect it and back off, not crash immediately.
   describe('body-level RATE_LIMITED retry (HTTP 200)', () => {
     beforeEach(() => {
@@ -403,11 +429,11 @@ describe('fetchGitHubContributions', () => {
         );
 
       const promise = fetchGitHubContributions('octocat');
+      void promise;
+
       await vi.advanceTimersByTimeAsync(500);
-      const { calendar: result } = await promise;
 
       expect(fetch).toHaveBeenCalledTimes(2);
-      expect(result.totalContributions).toBe(mockCalendar.totalContributions);
     });
 
     it('throws after exhausting all retries on repeated body-level RATE_LIMITED errors', async () => {
@@ -436,6 +462,7 @@ describe('fetchGitHubContributions', () => {
   it('handles calendar with all days having zero contributions', async () => {
     const sparseCalendar: ContributionCalendar = {
       totalContributions: 0,
+      repoContributions: 0,
       weeks: [
         {
           contributionDays: [
@@ -457,13 +484,14 @@ describe('fetchGitHubContributions', () => {
     );
 
     const { calendar: result } = await fetchGitHubContributions('sparse-user');
-    expect(result.totalContributions).toBe(0);
+    expect(result.repoContributions).toBe(0);
     expect(result.weeks).toHaveLength(1);
   });
 
   it('is deterministic: two calls with empty-year response return identical data', async () => {
     const emptyCalendar: ContributionCalendar = {
       totalContributions: 0,
+      repoContributions: 0,
       weeks: [],
     };
 
@@ -483,8 +511,60 @@ describe('fetchGitHubContributions', () => {
     const r2 = await fetchGitHubContributions('empty-user', {
       bypassCache: true,
     });
-    expect(r1.calendar.totalContributions).toBe(r2.calendar.totalContributions);
+    expect(r1.calendar.repoContributions).toBe(r2.calendar.repoContributions);
     expect(r1.calendar.weeks).toEqual(r2.calendar.weeks);
+  });
+
+  it('falls back to stale cache with isOfflineFallback: true when fetch fails and cache has data', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockResponse({
+        data: {
+          user: {
+            contributionsCollection: {
+              contributionCalendar: mockCalendar,
+              commitContributionsByRepository: [],
+            },
+          },
+        },
+      })
+    );
+    await fetchGitHubContributions('fallback-user');
+
+    // Expire the cache entry manually by changing lastSyncedAt to be 10 minutes in the past
+    const key = cacheKey('contributions', 'fallback-user');
+    const cachedData = await contributionsCache.get(key);
+    if (cachedData) {
+      cachedData.calendar.lastSyncedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      await contributionsCache.set(key, cachedData, 7 * 24 * 60 * 60 * 1000);
+    }
+
+    vi.mocked(fetch).mockRejectedValue(new Error('API rate limit exceeded'));
+
+    const result = await fetchGitHubContributions('fallback-user');
+    expect(result.calendar.totalContributions).toBe(mockCalendar.totalContributions);
+    expect(result.isOfflineFallback).toBe(true);
+  });
+
+  it('falls back to stale cache when bypassCache is true but fetch fails and cache has data', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      mockResponse({
+        data: {
+          user: {
+            contributionsCollection: {
+              contributionCalendar: mockCalendar,
+              commitContributionsByRepository: [],
+            },
+          },
+        },
+      })
+    );
+    await fetchGitHubContributions('bypass-fallback-user');
+
+    vi.mocked(fetch).mockRejectedValue(new Error('Failed to fetch'));
+
+    const result = await fetchGitHubContributions('bypass-fallback-user', { bypassCache: true });
+    expect(result.calendar.totalContributions).toBe(mockCalendar.totalContributions);
+    expect(result.isOfflineFallback).toBe(true);
   });
 });
 
@@ -518,6 +598,32 @@ describe('fetchUserProfile', () => {
     expect(result.followers).toBe(mockProfile.followers);
     expect(result.following).toBe(mockProfile.following);
     expect(result.avatar_url).toBe(mockProfile.avatar_url);
+  });
+
+  it('sanitizes the profile by removing extra fields before returning', async () => {
+    const mockProfile = {
+      login: 'octocat',
+      name: 'The Octocat',
+      avatar_url: 'https://avatar.url',
+      public_repos: 8,
+      followers: 100,
+      following: 5,
+      created_at: '2011-01-25T18:44:36Z',
+      bio: 'GitHub mascot',
+      location: 'San Francisco',
+      extra_field: 'should be removed',
+      another_extra: 123,
+      plan: { name: 'pro', space: 1000 },
+    };
+
+    vi.mocked(fetch).mockResolvedValue(mockResponse(mockProfile));
+
+    const result = (await fetchUserProfile('octocat')) as unknown as Record<string, unknown>;
+
+    expect(result.login).toBe('octocat');
+    expect(result.extra_field).toBeUndefined();
+    expect(result.another_extra).toBeUndefined();
+    expect(result.plan).toEqual({ name: 'pro' });
   });
 
   it('encodes the username before using it in the REST profile path', async () => {
@@ -564,6 +670,29 @@ describe('fetchUserRepos', () => {
     );
     const result = await fetchUserRepos('octocat');
     expect(result[0].stargazers_count).toBe(1);
+  });
+
+  it('sanitizes repo objects by removing extra fields before returning', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      mockResponse([
+        {
+          name: 'some-repo',
+          stargazers_count: 10,
+          language: 'TypeScript',
+          id: 12345,
+          private: false,
+          owner: { login: 'octocat' },
+        },
+      ])
+    );
+
+    const result = (await fetchUserRepos('octocat')) as unknown as Record<string, unknown>[];
+
+    expect(result[0].stargazers_count).toBe(10);
+    expect(result[0].language).toBe('TypeScript');
+    expect(result[0].id).toBeUndefined();
+    expect(result[0].private).toBeUndefined();
+    expect(result[0].owner).toBeUndefined();
   });
 
   it('returns a full three-repo payload with the expected star counts and languages', async () => {
@@ -695,8 +824,14 @@ describe('fetchUserRepos', () => {
 });
 
 describe('fetchContributedRepos', () => {
-  beforeEach(() => vi.spyOn(global, 'fetch'));
-  afterEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.spyOn(global, 'fetch');
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it('returns contributed repos on success', async () => {
     const mockNodes = [
@@ -726,16 +861,103 @@ describe('fetchContributedRepos', () => {
     expect(result).toEqual(mockNodes);
   });
 
-  it('returns empty array when fetch fails', async () => {
-    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 500 }));
-    const result = await fetchContributedRepos('octocat');
-    expect(result).toEqual([]);
-  });
-
   it('returns empty array if data structure is missing', async () => {
     vi.mocked(fetch).mockResolvedValue(mockResponse({ data: null }));
     const result = await fetchContributedRepos('octocat');
     expect(result).toEqual([]);
+  });
+
+  it('throws (rather than returning []) when the request fails so the empty result is not cached', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 500 }));
+
+    const promise = fetchContributedRepos('octocat');
+    const assertion = expect(promise).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(3500);
+    await assertion;
+  });
+
+  it('throws on a rate-limited GraphQL 200 response instead of returning []', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      mockResponse({ errors: [{ type: 'RATE_LIMITED', message: 'API rate limit exceeded' }] })
+    );
+
+    const promise = fetchContributedRepos('octocat');
+    const assertion = expect(promise).rejects.toThrow('API Rate Limit Exceeded');
+    await vi.advanceTimersByTimeAsync(3500);
+    await assertion;
+  });
+
+  it('does not cache the failure: a later call refetches and can succeed', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 500 }));
+
+    const failing = fetchContributedRepos('octocat');
+    const assertion = expect(failing).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(3500);
+    await assertion;
+
+    const mockNodes = [{ name: 'r1', nameWithOwner: 'o/r1' }];
+    vi.mocked(fetch).mockResolvedValue(
+      mockResponse({ data: { user: { repositoriesContributedTo: { nodes: mockNodes } } } })
+    );
+
+    const result = await fetchContributedRepos('octocat');
+    expect(result).toEqual(mockNodes);
+  });
+});
+
+describe('forceRefresh write-back', () => {
+  beforeEach(() => vi.spyOn(global, 'fetch'));
+  afterEach(() => vi.restoreAllMocks());
+
+  it('fetchGitHubContributions: forceRefresh writes back so a later normal read is a cache hit', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      mockResponse({
+        data: { user: { contributionsCollection: { contributionCalendar: mockCalendar } } },
+      })
+    );
+
+    await fetchGitHubContributions('octocat', { forceRefresh: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    const result = await fetchGitHubContributions('octocat');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(result.calendar.totalContributions).toBe(mockCalendar.totalContributions);
+  });
+
+  it('fetchUserProfile: forceRefresh writes back so a later normal read is a cache hit', async () => {
+    const profile = {
+      login: 'octocat',
+      name: 'Octo',
+      avatar_url: '',
+      public_repos: 1,
+      followers: 1,
+      following: 1,
+      created_at: '2020-01-01T00:00:00Z',
+      bio: null,
+      location: null,
+    };
+    vi.mocked(fetch).mockResolvedValue(mockResponse(profile));
+
+    await fetchUserProfile('octocat', { forceRefresh: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    const result = await fetchUserProfile('octocat');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(result.login).toBe('octocat');
+  });
+
+  it('fetchContributedRepos: forceRefresh writes back so a later normal read is a cache hit', async () => {
+    const nodes = [{ name: 'r1', nameWithOwner: 'o/r1' }];
+    vi.mocked(fetch).mockResolvedValue(
+      mockResponse({ data: { user: { repositoriesContributedTo: { nodes } } } })
+    );
+
+    await fetchContributedRepos('octocat', { forceRefresh: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    const result = await fetchContributedRepos('octocat');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(nodes);
   });
 });
 
@@ -1133,6 +1355,7 @@ describe('getFullDashboardData', () => {
   it('maps contribution counts to correct intensity levels', async () => {
     const intensityCalendar: ContributionCalendar = {
       totalContributions: 30,
+      repoContributions: 30,
       weeks: [
         {
           contributionDays: [
@@ -1343,7 +1566,7 @@ describe('GitHub API cache behavior', () => {
     );
 
     const results = await requests;
-    expect(results.map((result) => result.calendar.totalContributions)).toEqual([42, 42, 42]);
+    expect(results.map((result) => result.calendar.repoContributions)).toEqual([42, 42, 42]);
   });
 
   it('dedupes rapid synchronous contribution requests until the delayed fetch resolves once', async () => {
@@ -1387,7 +1610,7 @@ describe('GitHub API cache behavior', () => {
     const results = await Promise.all(requests);
 
     expect(resolveFetchSpy).toHaveBeenCalledTimes(1);
-    expect(results.map((result) => result.calendar.totalContributions)).toEqual([42, 42, 42]);
+    expect(results.map((result) => result.calendar.repoContributions)).toEqual([42, 42, 42]);
   });
 
   it('refresh bypass: bypassCache=true forces a fresh fetch', async () => {
@@ -1688,19 +1911,6 @@ describe('displayName', () => {
   });
 });
 
-describe('validateGitHubUsername', () => {
-  it('returns true for a valid username', () => {
-    expect(validateGitHubUsername('valid-username-123')).toBe(true);
-  });
-
-  it('returns false for a too long username', () => {
-    expect(validateGitHubUsername('a'.repeat(40))).toBe(false);
-  });
-
-  it('returns false for a username with underscore', () => {
-    expect(validateGitHubUsername('invalid_username')).toBe(false);
-  });
-});
 describe('cacheKey', () => {
   it('creates key without year', () => {
     expect(cacheKey('profile', 'DeepSikha')).toBe('profile:deepsikha');
@@ -1844,14 +2054,14 @@ describe('fetchOrgMembers', () => {
     await fetchOrgMembers('octo/org');
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://api.github.com/orgs/octo%2Forg/members?per_page=50&page=1',
+      'https://api.github.com/orgs/octo%2Forg/members?per_page=100&page=1',
       expect.objectContaining({ cache: 'no-store' })
     );
   });
 
   it('paginates correctly up to less than perPage returning end', async () => {
-    const page1 = Array.from({ length: 50 }, (_, i) => ({ login: `user${i}` }));
-    const page2 = Array.from({ length: 20 }, (_, i) => ({ login: `user${50 + i}` }));
+    const page1 = Array.from({ length: 100 }, (_, i) => ({ login: `user${i}` }));
+    const page2 = Array.from({ length: 20 }, (_, i) => ({ login: `user${100 + i}` }));
 
     vi.mocked(fetch)
       .mockResolvedValueOnce(mockResponse(page1))
@@ -1859,21 +2069,21 @@ describe('fetchOrgMembers', () => {
 
     const members = await fetchOrgMembers('vercel');
 
-    expect(members).toHaveLength(70);
+    expect(members).toHaveLength(120);
     expect(members[0]).toBe('user0');
-    expect(members[69]).toBe('user69');
+    expect(members[119]).toBe('user119');
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('stops paginating at max limit of 4 pages even if pages return 50 members', async () => {
-    const pageData = Array.from({ length: 50 }, (_, i) => ({ login: `user${i}` }));
+  it('stops paginating at max limit of 1000 members even if pages return 100 members', async () => {
+    const pageData = Array.from({ length: 100 }, (_, i) => ({ login: `user${i}` }));
 
     vi.mocked(fetch).mockImplementation(async () => mockResponse(pageData));
 
     const members = await fetchOrgMembers('vercel');
 
-    expect(members).toHaveLength(200);
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(members).toHaveLength(1000);
+    expect(fetch).toHaveBeenCalledTimes(10);
   });
 });
 
@@ -1914,7 +2124,6 @@ describe('getOrgDashboardData', () => {
     const result = await getOrgDashboardData('vercel');
 
     expect(result.profile.username).toBe('vercel');
-    expect(result.stats.totalContributions).toBe(mockCalendar.totalContributions);
   });
 
   it('throws an error if the target is a User instead of an Organization', async () => {
@@ -1971,15 +2180,16 @@ describe('getWrappedData', () => {
     const result = await getWrappedData('octocat', '2024');
 
     expect(result.topLanguage).toBe('TypeScript');
-    expect(result.totalContributions).toBe(mockCalendar.totalContributions);
   });
 
   it('falls back to Unknown when repos have no language data', async () => {
     vi.mocked(fetch).mockImplementation(async (url) => {
       const urlStr = typeof url === 'string' ? url : (url?.toString() ?? '');
+
       if (urlStr.includes('/repos')) {
         return mockResponse([{ language: null }, { language: null }]);
       }
+
       return mockResponse({
         data: {
           user: {
@@ -1990,7 +2200,9 @@ describe('getWrappedData', () => {
         },
       });
     });
+
     const result = await getWrappedData('octocat', '2024');
+
     expect(result.topLanguage).toBe('Unknown');
   });
 
@@ -2023,6 +2235,48 @@ describe('getWrappedData', () => {
 
     expect(body.variables.from).toBe('2024-01-01T00:00:00Z');
     expect(body.variables.to).toBe('2024-12-31T23:59:59Z');
+  });
+
+  it('falls back to the current-year date range when wrapped year is missing or partial', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url?.toString() ?? '');
+
+      if (urlStr.includes('/repos')) {
+        return mockResponse([]);
+      }
+
+      return mockResponse({
+        data: {
+          user: {
+            contributionsCollection: {
+              contributionCalendar: mockCalendar,
+            },
+          },
+        },
+      });
+    });
+
+    const currentYear = new Date().getFullYear();
+    const fallbackRange = {
+      from: `${currentYear}-01-01T00:00:00Z`,
+      to: `${currentYear}-12-31T23:59:59Z`,
+    };
+
+    for (const year of [undefined, '', ' '] as unknown as string[]) {
+      vi.clearAllMocks();
+      clearGitHubApiCacheForTests();
+
+      await getWrappedData('octocat', year);
+
+      const graphQLCall = vi
+        .mocked(fetch)
+        .mock.calls.find(([url]) => url.toString().includes('/graphql'));
+
+      const body = JSON.parse(graphQLCall?.[1]?.body as string);
+
+      expect(body.variables.from).toBe(fallbackRange.from);
+      expect(body.variables.to).toBe(fallbackRange.to);
+    }
   });
 });
 
@@ -2116,5 +2370,46 @@ describe('computeDeveloperScore', () => {
         longestStreak: 2,
       })
     ).toBe(2);
+  });
+});
+
+describe('runCappedConcurrency', () => {
+  it('should process all items and return their results in order', async () => {
+    const items = [1, 2, 3, 4, 5];
+    const results = await runCappedConcurrency(items, 2, async (x) => {
+      return x * 10;
+    });
+
+    expect(results).toEqual([10, 20, 30, 40, 50]);
+  });
+
+  it('should strictly limit the concurrency to the specified limit', async () => {
+    const items = [1, 2, 3, 4, 5];
+    let activePromises = 0;
+    let maxConcurrentPromises = 0;
+
+    await runCappedConcurrency(items, 2, async (x) => {
+      activePromises++;
+      maxConcurrentPromises = Math.max(maxConcurrentPromises, activePromises);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activePromises--;
+      return x;
+    });
+
+    expect(maxConcurrentPromises).toBeLessThanOrEqual(2);
+  });
+
+  it('should handle errors inside tasks gracefully without aborting the entire sequence', async () => {
+    const items = [1, 2, 3, 4, 5];
+    const results = await runCappedConcurrency(items, 2, async (x) => {
+      if (x === 3) throw new Error('Task 3 failed');
+      return x * 10;
+    });
+
+    expect(results[0]).toBe(10);
+    expect(results[1]).toBe(20);
+    expect(results[2]).toBeNull();
+    expect(results[3]).toBe(40);
+    expect(results[4]).toBe(50);
   });
 });

@@ -1,5 +1,3 @@
-// app/(root)/dashboard/[username]/page.tsx
-
 import type { Metadata } from 'next';
 import DashboardClient from '@/components/dashboard/DashboardClient';
 import { getFullDashboardData, fetchUserProfile } from '@/lib/github';
@@ -32,8 +30,18 @@ export async function generateMetadata({
     queryParams.set('accent', resolvedSearchParams.accent);
 
   const ogImage = `${BASE_URL}/api/og?${queryParams.toString()}`;
-  const title = `${username}'s Commit Pulse`;
-  const description = `Check out ${username}'s GitHub contribution pulse — streaks, insights, and more on CommitPulse.`;
+
+  // Dynamic title based on whether a user is comparing stats
+  const compareUsername = resolvedSearchParams?.compare;
+  const title =
+    typeof compareUsername === 'string' && compareUsername
+      ? `Compare: ${username} vs ${compareUsername} | CommitPulse`
+      : `${username}'s Commit Pulse`;
+
+  const description =
+    typeof compareUsername === 'string' && compareUsername
+      ? `Comparing ${username} and ${compareUsername}'s GitHub contribution pulse on CommitPulse.`
+      : `Check out ${username}'s GitHub contribution pulse — streaks, insights, and more on CommitPulse.`;
 
   return {
     title,
@@ -63,6 +71,7 @@ export default async function DashboardPage({
   params: Promise<{ username: string }>;
   searchParams: Promise<{
     refresh?: string;
+    compare?: string;
     year?: string;
     month?: string;
     from?: string;
@@ -72,6 +81,7 @@ export default async function DashboardPage({
   const { username } = await params;
   const resolvedSearchParams = await searchParams;
   const bypassCache = resolvedSearchParams?.refresh === 'true';
+  const compareUsername = resolvedSearchParams?.compare;
   const period = resolveDashboardPeriod({
     year: resolvedSearchParams?.year,
     month: resolvedSearchParams?.month,
@@ -90,10 +100,11 @@ export default async function DashboardPage({
     });
   } catch (error) {
     if (error instanceof Error && error.message.includes('not found')) {
-      // Smart Redirect: If the GraphQL "user" query fails, check if it's actually an Organization
       let fallbackProfile;
       try {
-        fallbackProfile = await fetchUserProfile(username, { bypassCache });
+        fallbackProfile = await fetchUserProfile(username, {
+          bypassCache,
+        });
       } catch {
         return notFound();
       }
@@ -105,5 +116,24 @@ export default async function DashboardPage({
     throw error;
   }
 
-  return <DashboardClient initialData={data} username={username} period={period} />;
+  let compareData = null;
+
+  if (compareUsername && compareUsername.toLowerCase() !== username.toLowerCase()) {
+    try {
+      compareData = await getFullDashboardData(compareUsername, {
+        bypassCache,
+      });
+    } catch {
+      compareData = null;
+    }
+  }
+
+  return (
+    <DashboardClient
+      initialData={data}
+      username={username}
+      compareData={compareData}
+      period={period}
+    />
+  );
 }

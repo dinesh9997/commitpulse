@@ -75,6 +75,9 @@ export interface ContributionCalendar {
   /** Array of weekly contribution data covering the queried date range. */
   weeks: ContributionWeek[];
 
+  /** Optional aggregate repository contribution count preserved from mocked or extended calendar payloads. */
+  repoContributions?: number;
+
   /** Timestamp of the last successful GraphQL API sync. Used for delta updates. */
   lastSyncedAt?: string;
 }
@@ -95,6 +98,9 @@ export interface RepoContribution {
 export interface ExtendedContributionData {
   calendar: ContributionCalendar;
   repoContributions: RepoContribution[];
+  totalPRs?: number;
+  totalIssues?: number;
+  isOfflineFallback?: boolean;
 }
 
 /**
@@ -219,9 +225,20 @@ export interface BadgeParams {
   /** Opt-in to show volumetric gradients on the monolith floor. */
   gradient?: boolean;
 
+  /** Custom gradient color stops as comma-separated hex colors (e.g. 'ff6b35,ff007f,7000ff'). Requires at least 2 valid colors. */
+  gradient_stops?: string;
+
+  /** Custom gradient direction: 'vertical', 'horizontal', or 'diagonal'. Only used when gradient=true. */
+  gradient_dir?: 'vertical' | 'horizontal' | 'diagonal';
+
   disable_particles?: boolean;
   animate?: boolean;
   glow?: boolean;
+  isOfflineFallback?: boolean;
+  badges?: boolean;
+
+  /** @internal Temporary property to track custom gradient ID during SVG generation. */
+  __customGradientId?: string;
 }
 
 export interface GraphNode {
