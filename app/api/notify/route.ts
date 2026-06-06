@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '@/lib/mongodb';
 import { Notification } from '@/models/Notification';
 import { notifyPostSchema, notifyGetSchema } from '@/lib/validations';
@@ -174,7 +174,7 @@ export async function POST(req: Request) {
 
 // ─── DELETE /api/notify ──────────────────────────────────────────────────────
 // Remove notification preferences for a user (unsubscribe / right to erasure)
-export async function DELETE(req: NextRequest): Promise<NextResponse<NotificationResponse>> {
+export async function DELETE(req: NextRequest) {
   // Rate limiting
   const ip = getClientIp(req);
 
