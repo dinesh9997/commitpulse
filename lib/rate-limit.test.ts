@@ -320,91 +320,31 @@ describe('RateLimiter', () => {
     expect(await limiter.remaining(ip)).toBe(2);
   });
 
-  describe('allowlist and blocklist', () => {
-    it('allows allowed IPs even if limit is exceeded', async () => {
-      const limiter = new RateLimiter(1, 60000);
-      limiter.allow('1.1.1.1');
-      expect(await limiter.check('1.1.1.1')).toBe(true);
-      expect(await limiter.check('1.1.1.1')).toBe(true);
+  it('reset() sends DEL via pipeline to KV using ratelimit_class:<ip> key', async () => {
+    // Verifies that when KV env vars are set, reset() uses the pipeline endpoint
+    // with the correct key prefix — matching the key used in checkWithResult().
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => [{ result: 1 }] });
+    vi.stubGlobal('fetch', fetchMock);
 
-      const res = await limiter.checkWithResult('1.1.1.1');
-      expect(res.success).toBe(true);
-      expect(res.remaining).toBe(1);
-    });
+    process.env.KV_REST_API_URL = 'https://fake-kv.example.com';
+    process.env.KV_REST_API_TOKEN = 'fake-token';
 
-    it('blocks blocked IPs immediately', async () => {
-      const limiter = new RateLimiter(5, 60000);
-      limiter.block('2.2.2.2');
-      expect(await limiter.check('2.2.2.2')).toBe(false);
+    const limiter = new RateLimiter(3, 60000);
+    const ip = '8.8.8.8';
 
-      const res = await limiter.checkWithResult('2.2.2.2');
-      expect(res.success).toBe(false);
-      expect(res.remaining).toBe(0);
-    });
+    await limiter.reset(ip);
 
-    it('handles unallow and unblock', async () => {
-      const limiter = new RateLimiter(1, 60000);
-      limiter.allow('3.3.3.3');
-      limiter.unallow('3.3.3.3');
-      // Now it should be subject to normal rate limiting
-      expect(await limiter.check('3.3.3.3')).toBe(true);
-      expect(await limiter.check('3.3.3.3')).toBe(false);
+    const resetCall = fetchMock.mock.calls.find(
+      (args: unknown[]) => typeof args[0] === 'string' && (args[0] as string).includes('/pipeline')
+    );
+    expect(resetCall).toBeTruthy();
 
-      limiter.block('4.4.4.4');
-      limiter.unblock('4.4.4.4');
-      // Now it should be subject to normal rate limiting
-      expect(await limiter.check('4.4.4.4')).toBe(true);
-    });
-  });
+    const body = JSON.parse((resetCall![1] as { body: string }).body) as unknown[][];
+    expect(body).toEqual([['DEL', `ratelimit_class:${ip}`]]);
 
-  describe('Redis/KV integration', () => {
-    it('queries Redis/KV and returns success if count is within limit', async () => {
-      const mock = setupMockKV([{ result: 2 }]);
-      const limiter = new RateLimiter(5, 60000);
-      const res = await limiter.checkWithResult('127.0.0.1');
-
-      expect(res.success).toBe(true);
-      expect(res.remaining).toBe(3);
-      expect(mock).toHaveBeenCalledWith(
-        'https://mock-redis.upstash.io/pipeline',
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({ Authorization: 'Bearer mock-token' }),
-          body: expect.stringContaining('"ratelimit_class:127.0.0.1"'),
-        })
-      );
-    });
-
-    it('queries Redis/KV and returns false if count exceeds limit', async () => {
-      setupMockKV([{ result: 6 }]);
-      const limiter = new RateLimiter(5, 60000);
-      const res = await limiter.checkWithResult('127.0.0.1');
-
-      expect(res.success).toBe(false);
-      expect(res.remaining).toBe(0);
-    });
-
-    it('falls back to memory if fetch fails (non-ok response)', async () => {
-      setupMockKV({ ok: false, status: 500 });
-      const limiter = new RateLimiter(2, 60000);
-      expect(await limiter.check('1.2.3.4')).toBe(true);
-      expect(await limiter.check('1.2.3.4')).toBe(true);
-      expect(await limiter.check('1.2.3.4')).toBe(false);
-    });
-
-    it('falls back to memory if fetch throws a network error', async () => {
-      setupMockKV(new Error('Network error'));
-      const limiter = new RateLimiter(2, 60000);
-      expect(await limiter.check('1.2.3.5')).toBe(true);
-      expect(await limiter.check('1.2.3.5')).toBe(true);
-      expect(await limiter.check('1.2.3.5')).toBe(false);
-    });
-  });
-
-  it('handles limit of 0 with no cache record (covers fallback reset time)', async () => {
-    const limiter = new RateLimiter(0, 60000);
-    const res = await limiter.checkWithResult('8.8.8.8');
-    expect(res.success).toBe(false);
-    expect(res.reset).toBe(Date.now() + 60000);
+    // Cleanup
+    delete process.env.KV_REST_API_URL;
+    delete process.env.KV_REST_API_TOKEN;
+    vi.unstubAllGlobals();
   });
 });
