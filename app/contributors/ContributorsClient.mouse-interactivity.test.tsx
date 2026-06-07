@@ -57,9 +57,8 @@ vi.mock('next/image', () => ({
     alt,
     src,
     ...props
-  }: React.ImgHTMLAttributes<HTMLImageElement> & { width?: number; height?: number }) => (
-    <img alt={alt} src={src} {...props} />
-  ),
+  }: React.ImgHTMLAttributes<HTMLImageElement> & { width?: number; height?: number }) =>
+    React.createElement('img', { alt, src, ...props }),
 }));
 
 vi.mock('next/link', () => ({
