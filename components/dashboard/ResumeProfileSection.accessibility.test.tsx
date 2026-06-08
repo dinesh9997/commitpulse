@@ -92,7 +92,6 @@ vi.mock('./ResumePreviewForm', () => ({
 // ---------------------------------------------------------------------------
 // Accessibility test suite
 // ---------------------------------------------------------------------------
-
 describe('ResumeProfileSection – accessibility', () => {
   /**
    * Test 1 — ARIA Label / Accessibility Name Validation
@@ -132,6 +131,8 @@ describe('ResumeProfileSection – accessibility', () => {
     const user = userEvent.setup();
     render(<ResumeProfileSection githubUsername="janesmith" />);
 
+    const uploadButton = screen.getByRole('button', { name: /upload resume file/i });
+
     // Tab once – focus should land on the upload button.
     await user.tab();
     const uploadButton = screen.getByRole('button', { name: /upload resume file/i });
@@ -167,6 +168,7 @@ describe('ResumeProfileSection – accessibility', () => {
    * screen-reader announcements.
    */
   it('does not contain broken aria-describedby references that would confuse screen readers', async () => {
+    const user = userEvent.setup();
     const { container } = render(<ResumeProfileSection githubUsername="janesmith" />);
 
     const elementsWithDescribedBy = container.querySelectorAll('[aria-describedby]');
@@ -182,7 +184,7 @@ describe('ResumeProfileSection – accessibility', () => {
 
     // Also advance to the uploaded stage and repeat the check.
     const uploadButton = screen.getByRole('button', { name: /upload resume file/i });
-    await userEvent.click(uploadButton);
+    await user.click(uploadButton);
 
     const { container: updatedContainer } = render(
       <ResumeProfileSection githubUsername="janesmith" />
@@ -206,6 +208,7 @@ describe('ResumeProfileSection – accessibility', () => {
    * no heading level should be skipped within the component's rendered subtree.
    */
   it('maintains a logical heading hierarchy without skipping levels', async () => {
+    const user = userEvent.setup();
     render(<ResumeProfileSection githubUsername="janesmith" />);
 
     // Idle stage: exactly one heading rendered by this component.
@@ -227,7 +230,8 @@ describe('ResumeProfileSection – accessibility', () => {
     }
 
     // Advance to uploaded stage and re-check.
-    await userEvent.click(screen.getByRole('button', { name: /upload resume file/i }));
+    const uploadButton = screen.getByRole('button', { name: /upload resume file/i });
+    await user.click(uploadButton);
 
     const previewHeadings = screen.getAllByRole('heading');
     expect(screen.getByRole('heading', { name: /review parsed data/i })).toBeInTheDocument();
