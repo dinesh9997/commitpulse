@@ -10,6 +10,7 @@ import {
   sanitizeFont,
 } from './svg/sanitizer';
 import { themes } from './svg/themes';
+import type { HexColor } from '../types';
 
 export function toBooleanFlag(val?: string): boolean {
   return val === 'true' || val === '1';
@@ -226,7 +227,7 @@ const baseStreakParamsSchema = z.object({
       if (!val) return undefined;
       const cleanVal = val.trim().replace(/^#+/, '');
       if (/^([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(cleanVal)) {
-        return cleanVal;
+        return cleanVal as HexColor;
       }
       return undefined;
     }),
@@ -264,7 +265,7 @@ const baseStreakParamsSchema = z.object({
       if (!val) return undefined;
       const cleanVal = val.trim().replace(/^#+/, '');
       if (/^([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(cleanVal)) {
-        return cleanVal;
+        return cleanVal as HexColor;
       }
       return undefined;
     }),
@@ -279,12 +280,13 @@ const baseStreakParamsSchema = z.object({
           .map((c) => c.trim().replace(/^#+/, ''))
           .filter((c) => c.length > 0)
           .filter((c) => /^([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(c))
+          .map((c) => c as HexColor)
           .slice(0, 4);
         return parts.length > 0 ? parts : undefined;
       }
       const cleanVal = val.trim().replace(/^#+/, '');
       if (/^([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(cleanVal)) {
-        return cleanVal;
+        return cleanVal as HexColor;
       }
       return undefined;
     }),
