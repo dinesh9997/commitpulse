@@ -7,6 +7,27 @@ export default function AnimatedCursor() {
   const ringRef = useRef<HTMLDivElement>(null);
   const [isHovering, setIsHovering] = useState(false);
 
+  // ── Reduced motion: hide custom cursor entirely when user prefers it ──
+  const [prefersReduced, setPrefersReduced] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  });
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    const handler = (e: MediaQueryListEvent) => {
+      setPrefersReduced(e.matches);
+    };
+
+    mq.addEventListener('change', handler);
+
+    return () => {
+      mq.removeEventListener('change', handler);
+    };
+  }, []);
+  // ── End reduced motion guard ──────────────────────────────────────────
+
   const isHoveringRef = useRef(false);
 
   const mouse = useRef({ x: 0, y: 0 });
@@ -73,6 +94,9 @@ export default function AnimatedCursor() {
       document.body.style.cursor = '';
     };
   }, []);
+
+  // Render nothing when user prefers reduced motion — native cursor takes over
+  if (prefersReduced) return null;
 
   return (
     <>
