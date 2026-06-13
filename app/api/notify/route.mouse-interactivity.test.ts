@@ -236,7 +236,19 @@ describe('Notify route — Interactive Tooltips, Hovers & Touch Propagation', ()
       expect(getLatestResponse()).not.toBeNull();
     });
 
-    expect(getLatestResponse()?.status).toBe(200);
+    const response = getLatestResponse();
+
+    console.log('STATUS:', response?.status);
+
+    if (response) {
+      try {
+        console.log('BODY:', await response.clone().json());
+      } catch {
+        console.log('NO JSON BODY');
+      }
+    }
+
+    expect(response?.status).toBe(200);
     expect(Notification.findOneAndUpdate).toHaveBeenCalledOnce();
 
     const [filter] = vi.mocked(Notification.findOneAndUpdate).mock.calls[0];
