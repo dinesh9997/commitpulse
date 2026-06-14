@@ -9,7 +9,7 @@ import { useShareActions } from '@/hooks/useShareActions';
 
 type OptionState = 'idle' | 'loading' | 'success' | 'error';
 
-interface ShareSheetProps {
+export interface ShareSheetProps {
   username: string;
   isOpen: boolean;
   onClose: () => void;
