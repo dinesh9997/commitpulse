@@ -23,6 +23,9 @@ import {
 } from '../../../lib/github';
 import { getSecondsUntilUTCMidnight, getSecondsUntilMidnightInTimezone } from '../../../utils/time';
 import type { ContributionCalendar, ExtendedContributionData } from '../../../types';
+import { refreshPolicy } from '../../../services/github/refresh-policy';
+import { refreshRateLimiter } from '../../../services/github/refresh-rate-limiter';
+import { quotaMonitor } from '../../../services/github/quota-monitor';
 
 // Two weeks of realistic data. The last day has 0 contributions so the streak
 // is in "grace period" territory — a good baseline that exercises most code paths.
@@ -65,6 +68,9 @@ function makeRequest(params: Record<string, string> = {}): Request {
 describe('GET /api/streak', () => {
   beforeEach(() => {
     vi.clearAllMocks(); // reset call counts so per-test call assertions are isolated
+    refreshPolicy.reset();
+    refreshRateLimiter.reset();
+    quotaMonitor.reset();
     vi.mocked(fetchGitHubContributions).mockResolvedValue({
       calendar: mockCalendar,
       repoContributions: [],
