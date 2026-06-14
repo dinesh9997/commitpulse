@@ -6,13 +6,14 @@ import {
   generateRateLimitSVG,
   generateHeatmapSVG,
   generatePulseSVG,
-  particleCount,
-  escapeXML,
+  resolveFont,
   getSizeScale,
   truncateUsername,
   deterministicRandom,
   buildTowerPaths,
+  particleCount,
 } from './generator';
+import { escapeXML } from './sanitizer';
 import type { BadgeParams, ContributionCalendar, StreakStats, MonthlyStats } from '../../types';
 import { hexColor } from './sanitizer';
 import { themes } from './themes';

@@ -13,6 +13,7 @@ import {
   getLuminance,
   parseGradientStops,
   getGradientCoordinates,
+  escapeXML,
 } from './sanitizer';
 
 import { GRID_ORIGIN_X, GRID_ORIGIN_Y, TILE_HEIGHT_HALF, TILE_WIDTH_HALF } from './layoutConstants';
@@ -91,15 +92,6 @@ type Scaler = (n: number) => number;
 
 function createScaler(sf: number): Scaler {
   return (n: number): number => Math.round(n * sf);
-}
-
-export function escapeXML(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 export function particleCount(count: number): number {
@@ -973,7 +965,7 @@ export function generateMonthlySVG(stats: MonthlyStats, params: BadgeParams): st
 
   <rect width="${width}" height="${height}" rx="${radius}" fill="${params.hideBackground ? 'transparent' : bg}" />
 
-  <text x="20" y="40" class="title">${stats.currentMonthName.toUpperCase()}</text>
+  <text x="20" y="40" class="title">${escapeXML(stats.currentMonthName.toUpperCase())}</text>
   <text x="20" y="85" class="stats">${stats.currentMonthTotal}</text>
   <text x="20" y="105" class="label">${commitsLabel}</text>
 
@@ -1148,7 +1140,7 @@ export function generateWrappedSVG(
   aria-describedby="cp-desc-${safeId}"
 >
   <title id="cp-title-${safeId}">${safeUser}'s GitHub Wrapped ${year}</title>
-  <desc id="cp-desc-${safeId}">GitHub Wrapped stats for ${safeUser} in ${year}: ${stats.totalContributions} total contributions, top language is ${stats.topLanguage || 'Unknown'}, busiest month is ${stats.busiestMonth || 'Unknown'}.</desc>
+  <desc id="cp-desc-${safeId}">GitHub Wrapped stats for ${safeUser} in ${year}: ${stats.totalContributions} total contributions, top language is ${escapeXML(stats.topLanguage || 'Unknown')}, busiest month is ${escapeXML(stats.busiestMonth || 'Unknown')}.</desc>
   <defs>
     ${filterGlow}
   </defs>
@@ -1214,7 +1206,7 @@ export function generateWrappedSVG(
   <g transform="translate(210, 80)">
     <g transform="translate(0, 20)">
       <text x="0" y="0" class="grid-label" ${textClass}>TOP LANGUAGE</text>
-      <text x="0" y="20" class="grid-val" ${accentClass}>${stats.topLanguage || 'Unknown'}</text>
+      <text x="0" y="20" class="grid-val" ${accentClass}>${escapeXML(stats.topLanguage || 'Unknown')}</text>
     </g>
 
     <g transform="translate(130, 20)">
@@ -1240,7 +1232,7 @@ export function generateWrappedSVG(
   <g transform="translate(210, 205)">
     <text x="0" y="0" class="grid-label" ${textClass}>BUSIEST MONTH</text>
     <text x="0" y="20" class="grid-val" ${textClass}>
-      ${monthName}
+      ${escapeXML(monthName)}
       <tspan font-size="11" font-weight="500" ${accentClass}>🔥</tspan>
     </text>
   </g>
@@ -1333,7 +1325,7 @@ function generateAutoThemeMonthlySVG(stats: MonthlyStats, params: BadgeParams): 
 
   <rect width="${width}" height="${height}" rx="${radius}" ${params.hideBackground ? 'fill="transparent"' : 'class="cp-bg-fill"'} />
 
-  <text x="20" y="40" class="title">${stats.currentMonthName.toUpperCase()}</text>
+  <text x="20" y="40" class="title">${escapeXML(stats.currentMonthName.toUpperCase())}</text>
   <text x="20" y="85" class="stats">${stats.currentMonthTotal}</text>
   <text x="20" y="105" class="label">${commitsLabel}</text>
 

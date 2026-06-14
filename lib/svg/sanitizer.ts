@@ -144,11 +144,6 @@ export function normalizeHexColor(color: string): string | null {
   return null;
 }
 
-/**
- * Parses comma-separated hex colors from a gradient_stops URL parameter.
- * Accepts colors with or without leading '#'.
- * Returns an array of normalized hex colors (without '#'), or empty array if no valid colors found.
- */
 export function parseGradientStops(input?: string): string[] {
   if (!input || typeof input !== 'string') {
     return [];
@@ -162,11 +157,6 @@ export function parseGradientStops(input?: string): string[] {
   return colors;
 }
 
-/**
- * Converts a gradient direction ('vertical', 'horizontal', 'diagonal') into SVG linearGradient coordinates.
- * Returns {x1, y1, x2, y2} as percentage strings suitable for SVG linearGradient attributes.
- * Defaults to 'vertical' if direction is invalid.
- */
 export function getGradientCoordinates(dir?: string): {
   x1: string;
   y1: string;
@@ -184,4 +174,14 @@ export function getGradientCoordinates(dir?: string): {
     default:
       return { x1: '0%', y1: '0%', x2: '0%', y2: '100%' };
   }
+}
+
+export function escapeXML(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

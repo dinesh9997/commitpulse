@@ -16,14 +16,10 @@ import { getSecondsUntilUTCMidnight, getSecondsUntilMidnightInTimezone } from '@
 import type { BadgeParams, ContributionCalendar } from '@/types';
 import { themes } from '@/lib/svg/themes';
 import { streakParamsSchema } from '@/lib/validations';
-import { sanitizeHexColor } from '@/lib/svg/sanitizer';
+import { sanitizeHexColor, escapeXML } from '@/lib/svg/sanitizer';
 
 const SVG_CSP_HEADER =
   "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://fonts.gstatic.com;";
-
-function escapeSVGText(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 function getMonthlyReferenceDate(year: string | undefined, timezone: string): Date | undefined {
   if (!year) return undefined;
@@ -453,7 +449,7 @@ function buildErrorResponse(error: unknown, parseResult: ParseResult): NextRespo
       <svg xmlns="http://www.w3.org/2000/svg" width="400" height="150">
         <rect width="100%" height="100%" fill="#2d0000" rx="8"/>
         <text x="50%" y="50%" text-anchor="middle" fill="#ffcccc" font-family="sans-serif">
-          ${escapeSVGText(message)}
+          ${escapeXML(message)}
         </text>
       </svg>
     `;
