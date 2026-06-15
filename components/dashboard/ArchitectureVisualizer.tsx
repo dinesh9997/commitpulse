@@ -9,16 +9,13 @@ import {
   Folder,
   File,
   ChevronRight,
-  HelpCircle,
   Layers,
   Network,
   FileText,
   ChevronDown,
-  ListFilter,
   AlertTriangle,
   RotateCcw,
   ArrowRight,
-  CornerDownRight,
   Maximize2,
   Minimize2,
 } from 'lucide-react';
@@ -33,11 +30,13 @@ import {
   useEdgesState,
   Position,
   Handle,
+  type Node as FlowNode,
+  type Edge as FlowEdge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 // Custom Node: Folder
-const FolderNodeRenderer = ({ data }: any) => {
+const FolderNodeRenderer = ({ data }: { data: { label: string } }) => {
   return (
     <div className="px-3 py-2 rounded-xl border border-black/10 dark:border-white/10 bg-white/70 dark:bg-black/75 backdrop-blur-md shadow-md flex items-center gap-2 hover:border-purple-500/50 dark:hover:border-purple-500/50 transition-all duration-200 cursor-grab active:cursor-grabbing w-44">
       <Handle type="target" position={Position.Top} className="opacity-0" />
@@ -54,7 +53,11 @@ const FolderNodeRenderer = ({ data }: any) => {
 };
 
 // Custom Node: File
-const FileNodeRenderer = ({ data }: any) => {
+const FileNodeRenderer = ({
+  data,
+}: {
+  data: { label: string; type: string; linesOfCode: number };
+}) => {
   const getIcon = (type: string) => {
     switch (type) {
       case 'tsx':
@@ -96,16 +99,28 @@ const nodeTypes = {
   fileNode: FileNodeRenderer,
 };
 
+interface FileMetric {
+  name: string;
+  path: string;
+  size: number;
+  linesOfCode: number;
+  commits: number;
+  lastModified: string;
+  contributors: string[];
+  imports: string[];
+  exports: string[];
+}
+
 // Types for collapsible folder tree
 interface TreeNode {
   name: string;
   path: string;
   isFolder: boolean;
   children: TreeNode[];
-  data?: any;
+  data?: FileMetric;
 }
 
-function buildTree(files: any[], folders: string[]): TreeNode {
+function buildTree(files: FileMetric[], folders: string[]): TreeNode {
   const root: TreeNode = { name: 'root', path: '', isFolder: true, children: [] };
 
   folders.forEach((f) => {
@@ -169,7 +184,7 @@ const FolderTreeNode = ({
   activeNodePath,
 }: {
   node: TreeNode;
-  onNodeClick: (data: any) => void;
+  onNodeClick: (data?: FileMetric) => void;
   activeNodePath?: string;
 }) => {
   const [isOpen, setIsOpen] = useState(true);
@@ -230,6 +245,19 @@ const FolderTreeNode = ({
   );
 };
 
+interface SelectedNodeData {
+  name: string;
+  path: string;
+  isFolder: boolean;
+  size?: number;
+  linesOfCode?: number;
+  commits?: number;
+  lastModified?: string;
+  contributors?: string[];
+  imports?: string[];
+  exports?: string[];
+}
+
 interface ArchitectureVisualizerProps {
   onClose?: () => void;
 }
@@ -242,16 +270,22 @@ export default function ArchitectureVisualizer({ onClose }: ArchitectureVisualiz
   const [error, setError] = useState<string | null>(null);
 
   // Visualizer data
-  const [data, setData] = useState<any>(null);
-  const [selectedNode, setSelectedNode] = useState<any>(null);
+  const [data, setData] = useState<{
+    nodes: FlowNode[];
+    edges: FlowEdge[];
+    files: FileMetric[];
+    folders: string[];
+    summary: string;
+  } | null>(null);
+  const [selectedNode, setSelectedNode] = useState<SelectedNodeData | null>(null);
   const [activeTab, setActiveTab] = useState<'architecture' | 'tree' | 'dependencies' | 'summary'>(
     'architecture'
   );
   const [fullscreen, setFullscreen] = useState(false);
 
   // React Flow states
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
 
   const loadingSteps = [
     'Fetching repository...',
@@ -263,6 +297,7 @@ export default function ArchitectureVisualizer({ onClose }: ArchitectureVisualiz
   ];
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
   }, []);
 
@@ -318,9 +353,9 @@ export default function ArchitectureVisualizer({ onClose }: ArchitectureVisualiz
       clearInterval(interval);
       setData(result);
       toast.success('Architecture graph successfully generated!');
-    } catch (err: any) {
+    } catch (err: unknown) {
       clearInterval(interval);
-      setError(err?.message || 'Failed to read or analyze repository.');
+      setError(err instanceof Error ? err.message : 'Failed to read or analyze repository.');
       toast.error('Failed to generate architecture.');
     } finally {
       setIsLoading(false);
@@ -328,21 +363,29 @@ export default function ArchitectureVisualizer({ onClose }: ArchitectureVisualiz
   };
 
   // Node click selection in React Flow
-  const onNodeClick = useCallback((event: React.MouseEvent, node: any) => {
+  const onNodeClick = useCallback((event: React.MouseEvent, node: FlowNode) => {
     if (node.type === 'fileNode') {
-      setSelectedNode(node.data);
-    } else {
       setSelectedNode({
-        name: node.data.label,
-        path: node.data.path,
+        ...(node.data as unknown as FileMetric),
+        isFolder: false,
+      });
+    } else {
+      const dataLabel = (node.data as { label?: string })?.label || '';
+      const dataPath = (node.data as { path?: string })?.path || '';
+      setSelectedNode({
+        name: dataLabel,
+        path: dataPath,
         isFolder: true,
       });
     }
   }, []);
 
-  const handleTreeFileClick = (fileData: any) => {
+  const handleTreeFileClick = (fileData?: FileMetric) => {
     if (fileData) {
-      setSelectedNode(fileData);
+      setSelectedNode({
+        ...fileData,
+        isFolder: false,
+      });
     }
   };
 
@@ -558,18 +601,20 @@ export default function ArchitectureVisualizer({ onClose }: ArchitectureVisualiz
             >
               {/* Tabs list */}
               <div className="px-5 border-b border-black/5 dark:border-white/5 bg-gray-50/50 dark:bg-zinc-900/10 flex items-center gap-1.5 shrink-0 overflow-x-auto custom-scrollbar">
-                {[
-                  { id: 'architecture', label: 'Architecture', icon: Network },
-                  { id: 'tree', label: 'Folder Tree', icon: Folder },
-                  { id: 'dependencies', label: 'Dependencies', icon: Layers },
-                  { id: 'summary', label: 'Summary', icon: FileText },
-                ].map((tab) => {
+                {(
+                  [
+                    { id: 'architecture', label: 'Architecture', icon: Network },
+                    { id: 'tree', label: 'Folder Tree', icon: Folder },
+                    { id: 'dependencies', label: 'Dependencies', icon: Layers },
+                    { id: 'summary', label: 'Summary', icon: FileText },
+                  ] as const
+                ).map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeTab === tab.id;
                   return (
                     <button
                       key={tab.id}
-                      onClick={() => setActiveTab(tab.id as any)}
+                      onClick={() => setActiveTab(tab.id)}
                       className={`relative py-3.5 px-3 flex items-center gap-1.5 text-xs font-semibold transition-all border-b-2 outline-none cursor-pointer ${
                         isActive
                           ? 'border-purple-500 text-purple-600 dark:text-purple-400'
@@ -606,7 +651,9 @@ export default function ArchitectureVisualizer({ onClose }: ArchitectureVisualiz
                         className="dark:bg-[#111] dark:border-white/10 dark:text-white"
                       />
                       <MiniMap
-                        nodeColor={(n: any) => (n.type === 'folderNode' ? '#c084fc' : '#34d399')}
+                        nodeColor={(n: FlowNode) =>
+                          n.type === 'folderNode' ? '#c084fc' : '#34d399'
+                        }
                         maskColor="rgba(0, 0, 0, 0.4)"
                         className="dark:bg-[#111] dark:border-white/10 border-black/10"
                       />
@@ -643,16 +690,15 @@ export default function ArchitectureVisualizer({ onClose }: ArchitectureVisualiz
                       Code imports mapping
                     </h4>
 
-                    {data.files &&
-                    data.files.filter((f: any) => f.imports.length > 0).length === 0 ? (
+                    {data.files && data.files.filter((f) => f.imports.length > 0).length === 0 ? (
                       <div className="p-8 text-center text-xs text-gray-500 dark:text-white/40">
                         No internal import dependencies detected in analyzed files.
                       </div>
                     ) : (
                       data.files &&
                       data.files
-                        .filter((f: any) => f.imports.length > 0)
-                        .map((file: any) => (
+                        .filter((f) => f.imports.length > 0)
+                        .map((file) => (
                           <div
                             key={file.path}
                             className="p-3.5 rounded-xl border border-black/5 dark:border-white/5 bg-gray-50/50 dark:bg-zinc-900/10 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs"

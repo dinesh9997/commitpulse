@@ -62,6 +62,27 @@ interface AnalyzedFile {
   exports: string[];
 }
 
+interface RouteNode {
+  id: string;
+  type: string;
+  data: Record<string, unknown>;
+  position?: { x: number; y: number };
+}
+
+interface RouteEdge {
+  id: string;
+  source: string;
+  target: string;
+  type?: string;
+  animated?: boolean;
+  style?: Record<string, unknown>;
+}
+
+interface PackageJson {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+}
+
 /**
  * Validates and extracts owner & repo from GitHub URL
  */
@@ -265,7 +286,7 @@ export async function POST(req: NextRequest) {
     // Shallow clone the repository
     try {
       await execFilePromise('git', ['clone', '--depth', '1', cloneUrl, tempDir]);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Cloning failed for repository:', repoUrl, err);
       // Clean up tempDir if it was created
       if (tempDir && fs.existsSync(tempDir)) {
@@ -398,14 +419,14 @@ export async function POST(req: NextRequest) {
     );
 
     // Build Graph Nodes and Edges for React Flow
-    const nodes: any[] = [];
-    const edges: any[] = [];
+    const nodes: RouteNode[] = [];
+    const edges: RouteEdge[] = [];
 
     // 1. Create Folder nodes
     // Filter folders to only those that contain prioritized files
     const activeFolders = new Set<string>();
     prioritizedFiles.forEach((file) => {
-      let parts = file.split('/');
+      const parts = file.split('/');
       parts.pop(); // Remove file name
       while (parts.length > 0) {
         activeFolders.add(parts.join('/'));
@@ -486,7 +507,7 @@ export async function POST(req: NextRequest) {
     });
 
     // 4. Calculate node layout coordinates (Grouped by depth level)
-    const nodesByDepth: Record<number, any[]> = {};
+    const nodesByDepth: Record<number, RouteNode[]> = {};
     nodes.forEach((node) => {
       const depth = node.id.split('/').length - 1;
       if (!nodesByDepth[depth]) nodesByDepth[depth] = [];
@@ -513,7 +534,7 @@ export async function POST(req: NextRequest) {
     const geminiApiKey = process.env.GEMINI_API_KEY;
 
     // Detect frameworks and libraries from package.json if it exists
-    let packageJsonData: any = {};
+    let packageJsonData: PackageJson = {};
     try {
       const packageJsonPath = path.join(tempDir, 'package.json');
       if (fs.existsSync(packageJsonPath)) {
@@ -614,12 +635,13 @@ export async function POST(req: NextRequest) {
       edges,
       summary,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Architecture visualizer route crashed:', error);
-    return NextResponse.json(
-      { error: error?.message || 'An unexpected error occurred while analyzing the repository.' },
-      { status: 500 }
-    );
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : 'An unexpected error occurred while analyzing the repository.';
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   } finally {
     // Clean up temporary directory
     if (tempDir && fs.existsSync(tempDir)) {
