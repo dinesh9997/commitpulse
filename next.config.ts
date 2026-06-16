@@ -1,4 +1,6 @@
+import withSerwist from '@serwist/next';
 import type { NextConfig } from 'next';
+
 const nextConfig: NextConfig = {
   serverExternalPackages: ['next/og', '@resvg/resvg-js'],
   allowedDevOrigins: ['172.31.128.1'],
@@ -33,4 +35,14 @@ const nextConfig: NextConfig = {
     ],
   },
 };
-export default nextConfig;
+
+const withSerwistConfig = withSerwist({
+  // Source: our custom service worker entry point
+  swSrc: 'app/sw.ts',
+  // Output: where the compiled SW lands in `public/`
+  swDest: 'public/sw.js',
+  // Disable the SW in development — hot-reload and caching conflict
+  disable: process.env.NODE_ENV === 'development',
+});
+
+export default withSerwistConfig(nextConfig);
