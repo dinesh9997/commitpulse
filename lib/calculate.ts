@@ -396,10 +396,10 @@ export function aggregateCalendars(
   // manual clone is way faster than structuredClone for huge nested arrays
   const aggregatedBase: ContributionCalendar = {
     ...baseCalendar,
-    weeks: (baseCalendar.weeks || []).map(w => ({
+    weeks: (baseCalendar.weeks || []).map((w) => ({
       ...w,
-      contributionDays: (w?.contributionDays || []).map(d => ({ ...d }))
-    }))
+      contributionDays: (w?.contributionDays || []).map((d) => ({ ...d })),
+    })),
   };
 
   aggregatedBase.totalContributions = totalContributions;
