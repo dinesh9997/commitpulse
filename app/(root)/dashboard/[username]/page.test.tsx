@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import DashboardPage, { DashboardContent, generateMetadata } from './page';
+import DashboardPage, { generateMetadata } from './page';
 import { getFullDashboardData } from '@/lib/github';
 
 const { mockNotFound } = vi.hoisted(() => ({
@@ -208,10 +208,12 @@ describe('DashboardPage', () => {
 
   describe('DashboardPage rendering', () => {
     it('renders the dashboard components with the fetched data', async () => {
-      const PageContent = await DashboardContent({
-        username: 'octocat',
-        searchParams: {},
+      const SuspenseTree = await DashboardPage({
+        params: Promise.resolve({ username: 'octocat' }),
+        searchParams: Promise.resolve({}),
       });
+      const DashboardContent = SuspenseTree.props.children.type;
+      const PageContent = await DashboardContent(SuspenseTree.props.children.props);
 
       render(PageContent);
 
@@ -242,10 +244,12 @@ describe('DashboardPage', () => {
     });
 
     it('calls getFullDashboardData with bypassCache: true when refresh param is set', async () => {
-      const PageContent = await DashboardContent({
-        username: 'octocat',
-        searchParams: { refresh: 'true' },
+      const SuspenseTree = await DashboardPage({
+        params: Promise.resolve({ username: 'octocat' }),
+        searchParams: Promise.resolve({ refresh: 'true' }),
       });
+      const DashboardContent = SuspenseTree.props.children.type;
+      const PageContent = await DashboardContent(SuspenseTree.props.children.props);
 
       render(PageContent);
 
@@ -261,10 +265,12 @@ describe('DashboardPage', () => {
     });
 
     it('passes a calendar-year query through to getFullDashboardData', async () => {
-      const PageContent = await DashboardContent({
-        username: 'octocat',
-        searchParams: { year: '2024' },
+      const SuspenseTree = await DashboardPage({
+        params: Promise.resolve({ username: 'octocat' }),
+        searchParams: Promise.resolve({ year: '2024' }),
       });
+      const DashboardContent = SuspenseTree.props.children.type;
+      const PageContent = await DashboardContent(SuspenseTree.props.children.props);
 
       render(PageContent);
 
@@ -280,10 +286,12 @@ describe('DashboardPage', () => {
     });
 
     it('passes the correct activity data to the historical trend view', async () => {
-      const PageContent = await DashboardContent({
-        username: 'octocat',
-        searchParams: {},
+      const SuspenseTree = await DashboardPage({
+        params: Promise.resolve({ username: 'octocat' }),
+        searchParams: Promise.resolve({}),
       });
+      const DashboardContent = SuspenseTree.props.children.type;
+      const PageContent = await DashboardContent(SuspenseTree.props.children.props);
 
       render(PageContent);
 
@@ -294,10 +302,12 @@ describe('DashboardPage', () => {
     it('calls notFound when dashboard data fetch throws an error', async () => {
       vi.mocked(getFullDashboardData).mockRejectedValueOnce(new Error('User not found'));
 
-      await DashboardContent({
-        username: 'missing-user',
-        searchParams: {},
+      const SuspenseTree = await DashboardPage({
+        params: Promise.resolve({ username: 'missing-user' }),
+        searchParams: Promise.resolve({}),
       });
+      const DashboardContent = SuspenseTree.props.children.type;
+      await DashboardContent(SuspenseTree.props.children.props);
 
       expect(mockNotFound).toHaveBeenCalledOnce();
     });

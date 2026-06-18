@@ -93,7 +93,7 @@ export default async function DashboardPage({
   );
 }
 
-export async function DashboardContent({
+async function DashboardContent({
   username,
   searchParams,
 }: {
