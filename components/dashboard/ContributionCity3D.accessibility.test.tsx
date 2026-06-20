@@ -95,7 +95,9 @@ describe('ContributionCity3D Accessibility', () => {
     await user.tab(); // "before" button
     expect(screen.getByTestId('before')).toHaveFocus();
 
-    // Tab moves straight from "before" to "after" — the canvas is not a stop.
+    // Tab moves from "before" to "Replay My Year" button, then to "after" — the canvas is not a stop.
+    await user.tab();
+    expect(screen.getByRole('button', { name: /replay my year/i })).toHaveFocus();
     await user.tab();
     expect(screen.getByTestId('after')).toHaveFocus();
     expect(canvas).not.toHaveFocus();
@@ -183,6 +185,8 @@ describe('ContributionCity3D Accessibility', () => {
     expect(screen.getByRole('link', { name: /skip to content/i })).toHaveFocus();
     await user.tab();
     expect(screen.getByTestId('before')).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: /replay my year/i })).toHaveFocus();
     await user.tab();
     expect(screen.getByTestId('after')).toHaveFocus();
 
