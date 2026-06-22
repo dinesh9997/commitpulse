@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { getLabels, labels } from '../badgeLabels';
 
 const requiredKeys = [
-  'Current Streak',
-  'Annual Total',
-  'Peak Streak',
+  'CURRENT_STREAK',
+  'ANNUAL_SYNC_TOTAL',
+  'PEAK_STREAK',
   'COMMITS_THIS_MONTH',
   'VS_LAST_MONTH',
 ] as const;
