@@ -1034,7 +1034,6 @@ async function fetchContributionsUncached(
 
   calendar.lastSyncedAt = new Date().toISOString();
 
-  // 1. Fabricate the LOC additions and deletions fields with strict lint-compliant object mappings
   const processedWeeks = (calendar.weeks || []).map((week: unknown) => {
     const rawWeek = week as unknown as Record<string, unknown>;
     const contributionDays = Array.isArray(rawWeek.contributionDays)
@@ -1048,22 +1047,13 @@ async function fetchContributionsUncached(
         const count = typeof rawDay.contributionCount === 'number' ? rawDay.contributionCount : 0;
 
         if (count === 0) {
-          return {
-            ...rawDay,
-            locAdditions: 0,
-            locDeletions: 0,
-          };
+          return { ...rawDay, locAdditions: 0, locDeletions: 0 };
         }
-        return {
-          ...rawDay,
-          locAdditions: undefined,
-          locDeletions: undefined,
-        };
+        return rawDay;
       }),
     };
   }) as unknown as typeof calendar.weeks;
 
-  // 2. Return the extended structure with processed fields packed into the calendar
   return {
     calendar: {
       ...calendar,
